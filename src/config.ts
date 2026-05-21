@@ -27,4 +27,6 @@ export const config = {
     ].join(",")).split(","),
   /** Optional shared secret used by the Telegram bot to authenticate as itself. */
   botSecret: process.env["BOT_SECRET"] ?? "",
+  /** Optional Postgres URL. When unset, the server runs in memory-only mode. */
+  databaseUrl: process.env["DATABASE_URL"] ?? "",
 };

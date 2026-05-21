@@ -11,6 +11,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { config } from "./config.js";
 import { Game } from "./game.js";
 import { Matchmaker } from "./matchmaker.js";
+import * as repo from "./repo.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -25,8 +26,11 @@ interface ClientState {
 
 const matchmaker = new Matchmaker();
 const games = new Map<string, Game>();
+const gameStartedAt = new Map<string, Date>();
 /** Direct (non-matchmade) games waiting for the two specified users to join. */
 const pendingDirect = new Map<string, { gameId: string; whiteId: string; blackId: string; tc: { initial: number; increment: number }; createdAt: number; }>();
+/** Track persistence already done so we don't insert twice. */
+const persisted = new Set<string>();
 /** Map from userId to active sockets (a user may have multiple tabs/devices). */
 const sockets = new Map<string, Set<WebSocket>>();
 /** Per-socket state. */
@@ -50,6 +54,21 @@ function broadcastGameState(game: Game, override?: ServerMessage["type"]) {
   const msg: ServerMessage = { type, game: snap } as any;
   broadcastToUser(game.white.id, msg);
   broadcastToUser(game.black.id, msg);
+  if (snap.status === "finished") void persistIfFinished(game);
+}
+
+async function persistIfFinished(game: Game) {
+  if (persisted.has(game.id)) return;
+  persisted.add(game.id);
+  try {
+    const startedAt = gameStartedAt.get(game.id) ?? new Date();
+    await repo.recordFinishedGame(game.snapshot(), game.tc, startedAt);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[server] persist failed for game", game.id, err);
+    // Reset so we can retry on next tick.
+    persisted.delete(game.id);
+  }
 }
 
 function attachUser(ws: WebSocket, user: UserIdentity) {
@@ -101,6 +120,7 @@ function handleMessage(ws: WebSocket, msg: ClientMessage) {
         send(ws, { type: "seeking", tc: msg.tc });
       } else {
         games.set(game.id, game);
+        gameStartedAt.set(game.id, new Date());
         // Tell each player they have a game and which color they are.
         const snap = game.snapshot();
         broadcastToUser(game.white.id, { type: "gameStart", game: snap, you: "w" });
@@ -189,6 +209,8 @@ function tickClocks() {
       setTimeout(() => {
         games.delete(id);
         pendingDirect.delete(id);
+        gameStartedAt.delete(id);
+        persisted.delete(id);
       }, 5 * 60_000);
     }
   }
@@ -198,6 +220,7 @@ function tickClocks() {
     if (now - p.createdAt > 60 * 60_000) {
       pendingDirect.delete(id);
       games.delete(id);
+      gameStartedAt.delete(id);
     }
   }
 }
@@ -229,6 +252,18 @@ export function buildServer() {
     });
   });
 
+  app.get("/api/users/:id", async (req, res) => {
+    const u = await repo.getUser(req.params.id);
+    if (!u) return res.status(404).json({ error: "Not found" });
+    res.json(u);
+  });
+
+  app.get("/api/top", async (req, res) => {
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit ?? 10)));
+    const top = await repo.topUsers(limit);
+    res.json(top);
+  });
+
   /**
    * Create a direct (challenge-style) pending game. Used by the Telegram bot
    * after both players accept a `/challenge` invite. Returns a gameId that
@@ -256,6 +291,7 @@ export function buildServer() {
     const game = new Game(tc, whiteUser, blackUser);
     game.start();
     games.set(game.id, game);
+    gameStartedAt.set(game.id, new Date());
     pendingDirect.set(game.id, {
       gameId: game.id,
       whiteId: whiteUser.id,
