@@ -25,6 +25,8 @@ interface ClientState {
 
 const matchmaker = new Matchmaker();
 const games = new Map<string, Game>();
+/** Direct (non-matchmade) games waiting for the two specified users to join. */
+const pendingDirect = new Map<string, { gameId: string; whiteId: string; blackId: string; tc: { initial: number; increment: number }; createdAt: number; }>();
 /** Map from userId to active sockets (a user may have multiple tabs/devices). */
 const sockets = new Map<string, Set<WebSocket>>();
 /** Per-socket state. */
@@ -184,7 +186,18 @@ function tickClocks() {
     if (game.isFinished()) {
       // Keep finished games around briefly so clients can read the final state,
       // then garbage-collect after 5 minutes.
-      setTimeout(() => games.delete(id), 5 * 60_000);
+      setTimeout(() => {
+        games.delete(id);
+        pendingDirect.delete(id);
+      }, 5 * 60_000);
+    }
+  }
+  // Expire pending direct games that nobody joined within an hour.
+  const now = Date.now();
+  for (const [id, p] of pendingDirect) {
+    if (now - p.createdAt > 60 * 60_000) {
+      pendingDirect.delete(id);
+      games.delete(id);
     }
   }
 }
@@ -212,7 +225,45 @@ export function buildServer() {
       games: games.size,
       seekers: matchmaker.describe(),
       sockets: sockets.size,
+      pendingDirect: pendingDirect.size,
     });
+  });
+
+  /**
+   * Create a direct (challenge-style) pending game. Used by the Telegram bot
+   * after both players accept a `/challenge` invite. Returns a gameId that
+   * the bot embeds into the Mini App start_param so each player can join.
+   *
+   * Body: { whiteUser, blackUser, tc: {initial, increment}, secret? }
+   */
+  app.post("/direct", (req, res) => {
+    if (config.botSecret) {
+      const provided = req.header("x-bot-secret");
+      if (provided !== config.botSecret) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+    const { whiteUser, blackUser, tc } = (req.body ?? {}) as {
+      whiteUser?: UserIdentity;
+      blackUser?: UserIdentity;
+      tc?: { initial: number; increment: number };
+    };
+    if (!whiteUser?.id || !blackUser?.id || !tc?.initial) {
+      return res.status(400).json({ error: "Invalid body" });
+    }
+    // Build the game now and store it directly. Both sides will `joinGame`
+    // when they open the Mini App; the second join just attaches.
+    const game = new Game(tc, whiteUser, blackUser);
+    game.start();
+    games.set(game.id, game);
+    pendingDirect.set(game.id, {
+      gameId: game.id,
+      whiteId: whiteUser.id,
+      blackId: blackUser.id,
+      tc,
+      createdAt: Date.now(),
+    });
+    res.json({ gameId: game.id });
   });
 
   const server = http.createServer(app);
