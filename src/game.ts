@@ -35,12 +35,15 @@ export class Game {
   }
 
   /**
-   * Begin the game by starting white's clock. Idempotent.
+   * Transition the game from "waiting" to "active". The clock does NOT start
+   * here — it starts on the first move, matching real chess behaviour where
+   * white's clock only begins once white plays move 1.
    */
   start(now: number = Date.now()) {
     if (this.status !== "waiting") return;
     this.status = "active";
-    this.clockStartedAt = now;
+    // clockStartedAt stays null until the first move is made.
+    void now; // unused until first move
   }
 
   /**
@@ -52,6 +55,11 @@ export class Game {
     const turn = this.chess.turn() as Color;
     const expectedId = turn === "w" ? this.white.id : this.black.id;
     if (playerId !== expectedId) return null;
+
+    // Start the clock on the very first move (white's first move).
+    if (this.clockStartedAt === null) {
+      this.clockStartedAt = now;
+    }
 
     // Deduct elapsed time from the moving side. If they ran out, they lose.
     if (this.clockStartedAt !== null) {
@@ -165,6 +173,7 @@ export class Game {
 
   /**
    * Called periodically to expire clocks even when no move is being made.
+   * Does nothing before the first move (clockStartedAt is null).
    */
   tick(now: number = Date.now()): GameSnapshot | null {
     if (this.status !== "active" || this.clockStartedAt === null) return null;
