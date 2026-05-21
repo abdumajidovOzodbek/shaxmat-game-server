@@ -19,14 +19,9 @@ export interface TgUser {
   language_code?: string;
 }
 
-export interface VerifyResult {
-  ok: true;
-  user: TgUser;
-  authDate: number;
-} | {
-  ok: false;
-  reason: string;
-};
+export type VerifyResult =
+  | { ok: true; user: TgUser; authDate: number }
+  | { ok: false; reason: string };
 
 /**
  * Verify Telegram Mini App initData and extract the user.
