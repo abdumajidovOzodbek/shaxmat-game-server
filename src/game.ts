@@ -23,6 +23,9 @@ export class Game {
   private status: GameSnapshot["status"] = "waiting";
   private result: GameSnapshot["result"];
   private drawOffer: GameSnapshot["drawOffer"] = null;
+  /** Track whether each side has completed their first move. */
+  private whiteMoved = false;
+  private blackMoved = false;
 
   constructor(
     readonly tc: TimeControl,
@@ -56,10 +59,12 @@ export class Game {
     const expectedId = turn === "w" ? this.white.id : this.black.id;
     if (playerId !== expectedId) return null;
 
-    // Start the clock on the very first move (white's first move).
-    if (this.clockStartedAt === null) {
-      this.clockStartedAt = now;
-    }
+    // Start the clock only after both sides have made their first move.
+    // - Before white's move 1: both clocks frozen.
+    // - After white's move 1 (black to move): black's clock still frozen.
+    // - After black's move 1 (white to move): both clocks now active.
+    if (turn === "w") this.whiteMoved = true;
+    else this.blackMoved = true;
 
     // Deduct elapsed time from the moving side. If they ran out, they lose.
     if (this.clockStartedAt !== null) {
@@ -120,7 +125,8 @@ export class Game {
       this.result = { kind: "draw", reason: "fifty" };
       this.clockStartedAt = null;
     } else {
-      this.clockStartedAt = now;
+      // Only run the clock if both sides have made their first move.
+      this.clockStartedAt = (this.whiteMoved && this.blackMoved) ? now : null;
     }
 
     return this.snapshot();
