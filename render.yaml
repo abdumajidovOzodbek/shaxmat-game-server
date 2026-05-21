@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: shaxmat-game-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
