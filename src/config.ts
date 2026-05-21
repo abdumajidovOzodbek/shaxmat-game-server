@@ -29,4 +29,9 @@ export const config = {
   botSecret: process.env["BOT_SECRET"] ?? "",
   /** Optional Postgres URL. When unset, the server runs in memory-only mode. */
   databaseUrl: process.env["DATABASE_URL"] ?? "",
+  /**
+   * Telegram bot token. Used to verify Mini App initData signatures.
+   * When unset, initData verification is skipped (dev mode).
+   */
+  telegramBotToken: process.env["TELEGRAM_TOKEN"] ?? "",
 };

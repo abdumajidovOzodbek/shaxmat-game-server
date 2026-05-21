@@ -12,6 +12,7 @@ import { config } from "./config.js";
 import { Game } from "./game.js";
 import { Matchmaker } from "./matchmaker.js";
 import * as repo from "./repo.js";
+import { verifyInitData } from "./tgAuth.js";
 import type {
   ClientMessage,
   ServerMessage,
@@ -101,7 +102,30 @@ function handleMessage(ws: WebSocket, msg: ClientMessage) {
 
   switch (msg.type) {
     case "hello": {
-      attachUser(ws, msg.user);
+      let identity = msg.user;
+
+      // If the client sent initData, verify it and upgrade the identity.
+      // This prevents URL-param spoofing for users who open the Mini App
+      // inside Telegram (where initData is always present and signed).
+      if (msg.initData && config.telegramBotToken) {
+        const result = verifyInitData(msg.initData, config.telegramBotToken);
+        if (result.ok) {
+          const u = result.user;
+          const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.first_name;
+          identity = {
+            id: `tg:${u.id}`,
+            name,
+            username: u.username,
+            photoUrl: u.photo_url,
+          };
+        } else {
+          // Log but don't reject — fall back to URL-provided identity.
+          // eslint-disable-next-line no-console
+          console.warn("[auth] initData verification failed:", result.reason);
+        }
+      }
+
+      attachUser(ws, identity);
       send(ws, { type: "welcome", serverTime: Date.now() });
       break;
     }

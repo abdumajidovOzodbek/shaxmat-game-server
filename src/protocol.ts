@@ -23,7 +23,7 @@ export interface TimeControl {
 }
 
 export type ClientMessage =
-  | { type: "hello"; user: UserIdentity }
+  | { type: "hello"; user: UserIdentity; /** Raw Telegram WebApp.initData for server-side verification. */ initData?: string }
   | { type: "seek"; tc: TimeControl }
   | { type: "cancelSeek" }
   | { type: "joinGame"; gameId: string }
